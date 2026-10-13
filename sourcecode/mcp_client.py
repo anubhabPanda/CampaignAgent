@@ -26,10 +26,11 @@ class McpToolError(RuntimeError):
 
 
 def _transport() -> StreamableHttpTransport:
-    url = os.getenv("S17_MCP_URL")
-    token = os.getenv("S17_MCP_TOKEN")
-    if not url or not token:
-        raise McpConfigError("campaign tools require S17_MCP_URL and S17_MCP_TOKEN")
+    base_url = os.getenv("AGENTSWITCH_BASE_URL")
+    token = os.getenv("AGENTSWITCH_TOKEN")
+    if not base_url or not token:
+        raise McpConfigError("campaign tools require AGENTSWITCH_BASE_URL and AGENTSWITCH_TOKEN")
+    url = f"{base_url.rstrip('/')}/api/mcp"
     return StreamableHttpTransport(
         url=url,
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},

@@ -432,7 +432,7 @@ class AgentRuntime:
             unavailable |= registry.family("coding")
         if self._skills() is None:
             unavailable |= {"load_skill"}
-        if not (os.getenv("S17_MCP_URL") and os.getenv("S17_MCP_TOKEN")):
+        if not (os.getenv("AGENTSWITCH_BASE_URL") and os.getenv("AGENTSWITCH_TOKEN")):
             unavailable |= set(CAMPAIGN_TOOL_BINDINGS)
 
         async def planning_llm(planning_prompt: str, system: str) -> dict[str, Any]:
