@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 from typing import Any
-
+from openai import AsyncOpenAI
 import httpx
 
 
@@ -166,3 +166,100 @@ class GatewayClient:
     async def close(self) -> None:
         if self._owns_client:
             await self._client.aclose()
+
+
+class OpenAIGatewayClient:
+    """A ``ChatTransport`` that calls OpenAI directly, bypassing the GLC gateway.
+
+    sourcecode holds the provider credential itself in this mode: no routing, no
+    quota pool, no provider fallback — just ``OPENAI_API_KEY``, ``OPENAI_BASE_URL``
+    (optional, for OpenAI-compatible endpoints) and ``OPENAI_MODEL``. The return
+    shape matches :class:`GatewayClient` exactly, so the budget controller and
+    every caller of ``app.state.gateway`` are unaffected by which one is wired in.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        client: Any | None = None,
+    ) -> None:
+
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL") or None
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        # The SDK requires a non-empty key at construction time even when the
+        # caller never ends up making a real call (e.g. tests that swap this
+        # client out for a fake before any request happens), so a missing key
+        # gets a placeholder here rather than failing the whole process start.
+        self._client = client or AsyncOpenAI(api_key=self.api_key or "unset", base_url=self.base_url)
+        self._owns_client = client is None
+
+    async def chat(
+        self, *, prompt: str, system: str, request: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """One chat call, returning usage in the same shape ``GatewayClient`` does."""
+        request = request or {}
+        model = str(request.get("model") or self.model)
+        max_tokens = int(request.get("max_tokens") or 1600)
+        temperature = request.get("temperature", 0)
+        response = await self._client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        choice = response.choices[0]
+        usage = response.usage
+        cached = getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0) or 0
+        return {
+            "text": choice.message.content or "",
+            "provider": "openai",
+            "model": response.model,
+            "input_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+            "output_tokens": getattr(usage, "completion_tokens", 0) or 0,
+            "cache_read_input_tokens": cached,
+            "cache_creation_input_tokens": 0,
+            "latency_ms": None,
+            "stop_reason": choice.finish_reason,
+        }
+
+    async def complete(
+        self,
+        prompt: str,
+        system: str,
+        *,
+        session: str | None = None,
+        request: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """The unbudgeted path, for a run created without a ceiling."""
+        body: dict[str, Any] = {**(request or {})}
+        result = await self.chat(prompt=prompt, system=system, request=body)
+        return {
+            "text": result["text"], "provider": result["provider"], "model": result["model"],
+            "input_tokens": result["input_tokens"], "output_tokens": result["output_tokens"],
+        }
+
+    async def health(self) -> dict[str, Any]:
+        await self._client.models.list()
+        return {"ok": True, "provider": "openai", "model": self.model}
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self._client.close()
+
+
+def build_gateway() -> GatewayClient | OpenAIGatewayClient:
+    """Pick the chat transport: direct OpenAI if a key is configured, else GLC.
+
+    ``OPENAI_API_KEY`` is the switch. Set it to use OpenAI directly; leave it
+    unset to fall back to the existing GLC gateway unchanged.
+    """
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return OpenAIGatewayClient()
+    return GatewayClient()

@@ -11,8 +11,10 @@ Optional environment:
   S17_HOST            defaults to 127.0.0.1
   INSTANCE            label used in result ids, defaults to "local"
 
-Assumes the gateway (GLC_BASE_URL) is already running separately, and that
-.env in the repo root carries the rest of the agent's configuration.
+The agent picks its own chat transport at startup: OpenAI directly if
+OPENAI_API_KEY is set in .env, otherwise the GLC gateway (GLC_BASE_URL), which
+must then already be running separately. .env in the repo root carries the
+rest of the agent's configuration either way.
 """
 import json
 import os
@@ -65,6 +67,9 @@ def wait_until_ready(proc, timeout_s=STARTUP_TIMEOUT_S):
         try:
             r = requests.get(f"{BASE}/healthz", timeout=2)
             if r.ok:
+                body = r.json()
+                print(f"[info] gateway_provider={body.get('gateway_provider')} "
+                      f"gateway_base_url={body.get('gateway_base_url')}", flush=True)
                 return True
         except requests.RequestException:
             pass

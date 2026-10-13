@@ -28,7 +28,7 @@ from sourcecode.core.a2a.trust import sign_card  # noqa: E402
 from sourcecode.core.memory import MemoryScope  # noqa: E402
 from sourcecode.events import AutonomousEventEngine, EventStore  # noqa: E402
 from sourcecode.events.routes import router as events_router  # noqa: E402
-from sourcecode.gateway import GatewayClient  # noqa: E402
+from sourcecode.gateway import build_gateway  # noqa: E402
 from sourcecode.runtime import AgentRuntime  # noqa: E402
 from sourcecode.ui.routes import router as ui_router  # noqa: E402
 
@@ -41,7 +41,7 @@ def _secrets(name: str) -> set[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.gateway = GatewayClient()
+    app.state.gateway = build_gateway()
     app.state.runtime = AgentRuntime()
     data_dir = app.state.runtime.root
     app.state.event_store = EventStore(data_dir / "events")
@@ -136,8 +136,13 @@ app.include_router(events_router)
 
 @app.get("/healthz")
 async def healthz(request: Request):
-    return {"ok": True, "service": "sourcecode", "port": PORT,
-            "glc_base_url": request.app.state.gateway.base_url}
+    gateway = request.app.state.gateway
+    provider = "openai" if hasattr(gateway, "model") else "glc"
+    info = {"ok": True, "service": "sourcecode", "port": PORT, "gateway_provider": provider,
+            "gateway_base_url": gateway.base_url}
+    if provider == "openai":
+        info["openai_model"] = gateway.model
+    return info
 
 
 @app.get("/readyz")
@@ -145,5 +150,5 @@ async def readyz(request: Request):
     try:
         gateway = await request.app.state.gateway.health()
     except Exception as error:
-        raise HTTPException(503, f"GLC is unavailable: {type(error).__name__}: {error}") from error
-    return {"ok": True, "glc": gateway}
+        raise HTTPException(503, f"gateway is unavailable: {type(error).__name__}: {error}") from error
+    return {"ok": True, "gateway": gateway}
