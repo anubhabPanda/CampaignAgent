@@ -1,0 +1,33 @@
+{
+  "tasks": [
+    {
+      "id": "local:agent_startup",
+      "title": "Comms Agent starts and reports healthy",
+      "passed": true,
+      "score": 1.0,
+      "evidence": "ready=True"
+    },
+    {
+      "id": "local:list_campaigns",
+      "title": "Run completes for prompt: 'List all subscribers with status unsubscribed.'",
+      "passed": true,
+      "score": 1.0,
+      "evidence": "status=completed answer='Based on the provided data, the following subscribers have a status of \"unsubscribed\":\\n\\n*   **Precision Fasteners Co** (sales@precisionfast.in)\\n*   **Suvarna Electricals** (office@suvarnaelec.in)\\n*   '"
+    },
+    {
+      "id": "local:list_audiences",
+      "title": "Run completes for prompt: 'List all campaigns'",
+      "passed": true,
+      "score": 1.0,
+      "evidence": "status=completed answer='There are currently no campaigns to list.'"
+    },
+    {
+      "id": "local:list_subscribers",
+      "title": "Run completes for prompt: 'List all subscribers'",
+      "passed": true,
+      "score": 1.0,
+      "evidence": "status=completed answer='Based on the provided data, there are 56 subscribers in total. Below are the details for the available records:\\n\\n| Name | Email | Status | List |\\n| :--- | :--- | :--- | :--- |\\n| Precision Fasteners Co'"
+    }
+  ],
+  "summary": "local: 4/4 checks passed"
+}
