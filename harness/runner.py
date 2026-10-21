@@ -47,7 +47,7 @@ BASE = f"http://{HOST}:{PORT}"
 # instead of requiring the caller to have configured one in advance.
 CONTROL_TOKEN = secrets.token_urlsafe(32)
 AUTH = {"Authorization": "Bearer " + CONTROL_TOKEN}
-INSTANCE = os.environ.get("INSTANCE", "local")
+INSTANCE = os.environ.get("AGENTSWITCH_INSTANCE", "local")
 STARTUP_TIMEOUT_S = 60
 
 # Variables the agent subprocess needs for its LLM/AgentSwitch transport.
@@ -139,11 +139,27 @@ try:
         for task_id, prompt in TASK_PROMPTS:
             try:
                 result = submit_run(prompt)
+                run_id = result.get("run_id")
                 status = result.get("status")
                 answer = result.get("answer") or {}
                 ok = status == "completed"
-                record(task_id, f"Run completes for prompt: {prompt!r}", ok,
-                       f"status={status} answer={str(answer)[:200]!r}")
+                evidence = f"run_id={run_id} status={status} answer={str(answer)[:200]!r}"
+                if not ok and run_id:
+                    # Pull the failing node(s) straight from the journal so the
+                    # evidence names the capability and error, not just "failed".
+                    try:
+                        journal = requests.get(f"{BASE}/v1/agent/runs/{run_id}",
+                                               headers=AUTH, timeout=30).json()
+                        failures = {
+                            node_id: (node.get("result") or {}).get("error")
+                            for node_id, node in (journal.get("nodes") or {}).items()
+                            if node.get("state") == "failed"
+                        }
+                        if failures:
+                            evidence += f" failed_nodes={failures}"
+                    except Exception as journal_exc:  # noqa: BLE001
+                        evidence += f" (could not fetch journal: {journal_exc!r})"
+                record(task_id, f"Run completes for prompt: {prompt!r}", ok, evidence)
             except Exception as exc:  # noqa: BLE001
                 record(task_id, f"Run completes for prompt: {prompt!r}", False, repr(exc))
     else:
