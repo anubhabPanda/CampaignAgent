@@ -1,8 +1,9 @@
-"""Embedding seam: production can use local Ollama; tests inject deterministic vectors."""
+"""Embedding seam: production can use local Ollama or OpenAI; tests inject deterministic vectors."""
 from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections import Counter
 from typing import Protocol
@@ -61,6 +62,53 @@ class OllamaNomicEmbedder:
                 pass
         except Exception:
             pass
+
+
+class OpenAIEmbedder:
+    """Embeds text via OpenAI's embeddings API.
+
+    Dependency-free (no `openai` SDK import) so the module keeps working even
+    when that package is absent; it talks directly to the REST endpoint,
+    mirroring ``OpenAIGatewayClient``'s env-var conventions (``OPENAI_API_KEY``,
+    ``OPENAI_BASE_URL``).
+    """
+
+    def __init__(
+        self,
+        model: str = "text-embedding-3-small",
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ):
+        self.model = model
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.base_url = (base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+
+    @property
+    def fingerprint(self) -> str:
+        return f"openai:{self.model}"
+
+    def embed(self, text: str) -> list[float]:
+        return self._embed(text)
+
+    def embed_document(self, text: str) -> list[float]:
+        return self._embed(text)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed(text)
+
+    def _embed(self, text: str) -> list[float]:
+        body = json.dumps({"model": self.model, "input": text}).encode()
+        request = Request(
+            self.base_url + "/embeddings",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key or ''}",
+            },
+        )
+        with urlopen(request, timeout=30) as response:  # nosec B310: configurable, trusted API endpoint
+            data = json.load(response)
+        return list(data["data"][0]["embedding"])
 
 
 class DeterministicEmbedder:

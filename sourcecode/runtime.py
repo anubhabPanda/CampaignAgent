@@ -28,7 +28,7 @@ from sourcecode.core.a2a import A2AClient
 from sourcecode.core.a2a.trust import AgentCardTrustPolicy
 from sourcecode.core.live_graph import Deferred, GraphStore, LiveGraphExecutor, TaskSpec
 from sourcecode.core.memory import MemoryKind, MemoryRecord, MemoryScope, MemoryStore, Principal, SourceRef
-from sourcecode.core.memory.embeddings import OllamaNomicEmbedder
+from sourcecode.core.memory.embeddings import DeterministicEmbedder, Embedder, OllamaNomicEmbedder, OpenAIEmbedder
 from sourcecode.economics import (
     TIER_KEY,
     BudgetAwarePlanner,
@@ -155,6 +155,53 @@ def metered(worker: Skill) -> Skill:
 
 
 
+class _FallbackEmbedder:
+    """Wraps a primary embedder, falling back to a backup when a call fails.
+
+    Keeps memory writes/recalls available even if the primary embedding
+    service (e.g. a remote OpenAI call) is unreachable or errors out.
+    """
+
+    def __init__(self, primary: Embedder, backup: Embedder) -> None:
+        self._primary = primary
+        self._backup = backup
+
+    @property
+    def fingerprint(self) -> str:
+        return getattr(self._primary, "fingerprint", type(self._primary).__name__)
+
+    def _try(self, method_name: str, text: str) -> list[float]:
+        try:
+            method = getattr(self._primary, method_name, self._primary.embed)
+            return method(text)
+        except Exception:
+            method = getattr(self._backup, method_name, self._backup.embed)
+            return method(text)
+
+    def embed(self, text: str) -> list[float]:
+        return self._try("embed", text)
+
+    def embed_document(self, text: str) -> list[float]:
+        return self._try("embed_document", text)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._try("embed_query", text)
+
+
+def _build_embedder() -> Embedder:
+    """Pick the embedding client: direct OpenAI if a key is configured, else local Ollama.
+
+    ``OPENAI_API_KEY`` is the switch, mirroring ``build_gateway()`` in
+    ``sourcecode/gateway.py``. Set it to embed via OpenAI directly (no local
+    Ollama instance required); leave it unset to keep using the local model.
+    If an OpenAI embedding call fails (network, auth, etc.), fall back to the
+    dependency-free ``DeterministicEmbedder`` rather than breaking memory.
+    """
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return _FallbackEmbedder(OpenAIEmbedder(), DeterministicEmbedder())
+    return OllamaNomicEmbedder()
+
+
 class AgentRuntime:
     """Owns the persistent stores and runs one user request through the graph."""
 
@@ -165,7 +212,7 @@ class AgentRuntime:
         # between those profiles.
         self.root = root or Path(os.getenv("S17_DATA_DIR", str(Path.home() / ".sourcecode")))
         self.root.mkdir(parents=True, exist_ok=True)
-        self.memory = MemoryStore(self.root / "memory.sqlite", embedder=OllamaNomicEmbedder())
+        self.memory = MemoryStore(self.root / "memory.sqlite", embedder=_build_embedder())
         self.graph = GraphStore(self.root / "graphs")
         self.outbox = ActionOutbox(self.root / "outbox")
         # One registry per runtime: the single source of truth for what a
