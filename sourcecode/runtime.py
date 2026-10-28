@@ -196,10 +196,14 @@ def _build_embedder() -> Embedder:
     Ollama instance required); leave it unset to keep using the local model.
     If an OpenAI embedding call fails (network, auth, etc.), fall back to the
     dependency-free ``DeterministicEmbedder`` rather than breaking memory.
+
+    Temporarily forced to ``DeterministicEmbedder`` only, in this runtime.
+    Original logic kept below, commented out, for easy restoration.
     """
-    if os.getenv("OPENAI_API_KEY", "").strip():
-        return _FallbackEmbedder(OpenAIEmbedder(), DeterministicEmbedder())
-    return OllamaNomicEmbedder()
+    # if os.getenv("OPENAI_API_KEY", "").strip():
+    #     return _FallbackEmbedder(OpenAIEmbedder(), DeterministicEmbedder())
+    # return OllamaNomicEmbedder()
+    return DeterministicEmbedder()
 
 
 class AgentRuntime:
